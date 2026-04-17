@@ -808,3 +808,995 @@ function loop(){
 
   requestAnimationFrame(loop);
 }
+/* =========================================
+   Part 8 : 分岐 + AIバトル（最終進化）
+========================================= */
+
+// ===== 分岐システム =====
+let currentLane = 0; // -1 左 / 0 中央 / 1 右
+const LANE_WIDTH = 6;
+
+// レーン変更
+window.addEventListener("keydown", e=>{
+  if(e.code === "ArrowLeft"){
+    currentLane = Math.max(-1, currentLane - 1);
+  }
+  if(e.code === "ArrowRight"){
+    currentLane = Math.min(1, currentLane + 1);
+  }
+});
+
+// 車をレーンに吸着
+function applyLane(){
+  const targetX = currentLane * LANE_WIDTH;
+  car.position.x += (targetX - car.position.x) * 0.1;
+}
+
+// ===== 分岐ビジュアル =====
+function createLaneMarks(){
+  const geo = new THREE.BoxGeometry(0.2,0.05,20);
+
+  for(let i=-1;i<=1;i++){
+    if(i===0) continue;
+
+    const line = new THREE.Mesh(geo, neonYellow);
+    line.position.set(i * LANE_WIDTH / 2, 0.05, car.position.z + 50);
+
+    scene.add(line);
+  }
+}
+
+// ===== AIライバル =====
+const rivals = [];
+
+function spawnRival(zOffset){
+  const r = new THREE.Mesh(
+    new THREE.BoxGeometry(2,1,4),
+    new THREE.MeshStandardMaterial({color:0x00ffcc})
+  );
+
+  r.position.set(
+    (Math.floor(Math.random()*3)-1)*LANE_WIDTH,
+    0,
+    car.position.z + zOffset
+  );
+
+  r.userData.speed = 60 + Math.random()*30;
+
+  scene.add(r);
+  rivals.push(r);
+}
+
+// 初期
+for(let i=0;i<5;i++){
+  spawnRival(i*120 + 200);
+}
+
+// ===== AI更新 =====
+function updateRivals(){
+
+  rivals.forEach(r=>{
+
+    // プレイヤー追尾
+    if(r.position.z > car.position.z){
+      r.position.z -= velocity * 0.6;
+    } else {
+      r.position.z += r.userData.speed * 0.05;
+    }
+
+    // ランダムレーン変更
+    if(Math.random() < 0.01){
+      r.position.x = (Math.floor(Math.random()*3)-1)*LANE_WIDTH;
+    }
+
+    // 再配置
+    if(r.position.z < car.position.z - 100){
+      r.position.z = car.position.z + 400;
+    }
+
+    // 衝突
+    const dx = r.position.x - car.position.x;
+    const dz = r.position.z - car.position.z;
+
+    if(Math.abs(dx) < 2 && Math.abs(dz) < 4){
+      velocity *= 0.6;
+      triggerCrash();
+    }
+
+  });
+
+}
+
+// ===== バトルスコア =====
+let overtake = 0;
+
+function checkOvertake(){
+  rivals.forEach(r=>{
+    if(r.position.z < car.position.z && !r.userData.passed){
+      r.userData.passed = true;
+      overtake++;
+      score += 500;
+    }
+  });
+}
+
+// ===== HUD強化 =====
+const battleUI = document.createElement("div");
+battleUI.style.position = "fixed";
+battleUI.style.top = "50px";
+battleUI.style.right = "20px";
+battleUI.style.color = "orange";
+battleUI.innerText = "OVERTAKE: 0";
+document.body.appendChild(battleUI);
+
+// ===== loop最終版 =====
+const oldLoop5 = loop;
+
+function loop(){
+
+  updatePhysics();
+  applyLane();          // ←追加（重要）
+  applyWanganCurve();
+  updateRoad();
+  updateEnemies();
+  updateRivals();       // ←AI
+  checkOvertake();      // ←追い越し
+  updateGame();
+  updateEnvironment();
+  updateEffects();
+  updateSound();
+  updateSparks();
+  checkCollisions();
+
+  const activeCar = carModel || car;
+
+  camera.position.x = activeCar.position.x;
+  camera.position.z = activeCar.position.z - 12;
+  camera.position.y = 5;
+
+  camera.lookAt(activeCar.position);
+
+  battleUI.innerText = "OVERTAKE: " + overtake;
+
+  composer.render();
+
+  requestAnimationFrame(loop);
+}
+/* =========================================
+   Part 9 : 最終強化（ブラー + HUD + 安定化）
+========================================= */
+
+// ===== 疑似モーションブラー =====
+const blurPlaneGeo = new THREE.PlaneGeometry(2,2);
+const blurMat = new THREE.MeshBasicMaterial({
+  color: 0x000000,
+  transparent: true,
+  opacity: 0.0
+});
+
+const blurPlane = new THREE.Mesh(blurPlaneGeo, blurMat);
+blurPlane.position.z = -1;
+camera.add(blurPlane);
+scene.add(camera);
+
+// ===== HUD強化 =====
+const hudExtra = document.createElement("div");
+hudExtra.style.position = "fixed";
+hudExtra.style.bottom = "140px";
+hudExtra.style.right = "20px";
+hudExtra.style.color = "#00ffff";
+hudExtra.innerHTML = "MODE: AT<br>GEAR: 0";
+document.body.appendChild(hudExtra);
+
+// ===== 安定化パラメータ =====
+let delta = 0;
+let lastTime = performance.now();
+
+// ===== 更新 =====
+function updatePro(){
+
+  // Δ時間
+  const now = performance.now();
+  delta = (now - lastTime) / 16.666;
+  lastTime = now;
+
+  // ===== ブラー強度 =====
+  blurMat.opacity = Math.min(0.4, Math.abs(velocity)/120);
+
+  // ===== HUD =====
+  hudExtra.innerHTML =
+    "MODE: " + transmission.mode +
+    "<br>GEAR: " + transmission.gear;
+
+}
+
+// ===== loop最終最終 =====
+const oldLoop6 = loop;
+
+function loop(){
+
+  updatePro();
+
+  updatePhysics();
+  applyLane();
+  applyWanganCurve();
+  updateRoad();
+  updateEnemies();
+  updateRivals();
+  checkOvertake();
+  updateGame();
+  updateEnvironment();
+  updateEffects();
+  updateSound();
+  updateSparks();
+  checkCollisions();
+
+  const activeCar = carModel || car;
+
+  // カメラ（少し滑らかに）
+  camera.position.x += (activeCar.position.x - camera.position.x) * 0.15;
+  camera.position.z += (activeCar.position.z - 12 - camera.position.z) * 0.15;
+  camera.position.y += (5 - camera.position.y) * 0.1;
+
+  camera.lookAt(activeCar.position);
+
+  composer.render();
+
+  requestAnimationFrame(loop);
+}
+/* =========================================
+   Part 10 : セーブ + ランキング + 完成化
+========================================= */
+
+// ===== ローカルランキング =====
+let bestScore = localStorage.getItem("nero_best") || 0;
+
+// UI
+const rankUI = document.createElement("div");
+rankUI.style.position = "fixed";
+rankUI.style.top = "10px";
+rankUI.style.left = "50%";
+rankUI.style.transform = "translateX(-50%)";
+rankUI.style.color = "gold";
+rankUI.style.fontSize = "14px";
+document.body.appendChild(rankUI);
+
+// ===== セーブ処理 =====
+function saveScore(){
+  if(score > bestScore){
+    bestScore = score;
+    localStorage.setItem("nero_best", bestScore);
+  }
+}
+
+// ===== リセット =====
+function resetGame(){
+  score = 0;
+  overtake = 0;
+  velocity = 0;
+
+  car.position.set(0,0,0);
+}
+
+// ===== ゲームオーバー条件 =====
+let health = 100;
+
+function updateHealth(){
+  // 衝突で減る（既存処理と連動）
+  if(Math.abs(velocity) < 5){
+    health -= 0.05;
+  }
+
+  health = Math.max(0, health);
+
+  if(health <= 0){
+    saveScore();
+    alert("GAME OVER\nSCORE: " + score);
+    resetGame();
+    health = 100;
+  }
+}
+
+// ===== HUD =====
+const healthUI = document.createElement("div");
+healthUI.style.position = "fixed";
+healthUI.style.bottom = "60px";
+healthUI.style.left = "20px";
+healthUI.style.color = "red";
+document.body.appendChild(healthUI);
+
+// ===== 追加更新 =====
+function updateFinal(){
+
+  updateHealth();
+
+  rankUI.innerText = "BEST: " + bestScore;
+  healthUI.innerText = "HP: " + Math.floor(health);
+
+}
+
+// ===== loop完全最終 =====
+const oldLoop7 = loop;
+
+function loop(){
+
+  updatePro();
+  updateFinal();
+
+  updatePhysics();
+  applyLane();
+  applyWanganCurve();
+  updateRoad();
+  updateEnemies();
+  updateRivals();
+  checkOvertake();
+  updateGame();
+  updateEnvironment();
+  updateEffects();
+  updateSound();
+  updateSparks();
+  checkCollisions();
+
+  const activeCar = carModel || car;
+
+  camera.position.x += (activeCar.position.x - camera.position.x) * 0.15;
+  camera.position.z += (activeCar.position.z - 12 - camera.position.z) * 0.15;
+  camera.position.y += (5 - camera.position.y) * 0.1;
+
+  camera.lookAt(activeCar.position);
+
+  composer.render();
+
+  requestAnimationFrame(loop);
+}
+/* =========================================
+   Part 11 : 車カスタム（色・性能）
+========================================= */
+
+// ===== カスタム状態 =====
+const tuning = {
+  color: "#ffffff",
+  engine: 1.0,   // 加速倍率
+  grip: 1.0,     // ハンドリング
+  boostPower: 1.0
+};
+
+// ===== UI =====
+const customUI = document.createElement("div");
+customUI.style.position = "fixed";
+customUI.style.left = "20px";
+customUI.style.top = "120px";
+customUI.style.background = "rgba(0,0,0,0.6)";
+customUI.style.padding = "10px";
+customUI.style.color = "white";
+customUI.innerHTML = `
+<b>CAR TUNING</b><br>
+Color <input type="color" id="carColor"><br>
+Engine <input type="range" id="engine" min="0.5" max="2" step="0.1"><br>
+Grip <input type="range" id="grip" min="0.5" max="2" step="0.1"><br>
+Boost <input type="range" id="boostP" min="0.5" max="2" step="0.1"><br>
+`;
+document.body.appendChild(customUI);
+
+// ===== UI取得 =====
+const colorInput = document.getElementById("carColor");
+const engineInput = document.getElementById("engine");
+const gripInput = document.getElementById("grip");
+const boostInput = document.getElementById("boostP");
+
+// 初期値
+colorInput.value = tuning.color;
+engineInput.value = tuning.engine;
+gripInput.value = tuning.grip;
+boostInput.value = tuning.boostPower;
+
+// ===== カスタム適用 =====
+function applyTuning(){
+
+  tuning.color = colorInput.value;
+  tuning.engine = parseFloat(engineInput.value);
+  tuning.grip = parseFloat(gripInput.value);
+  tuning.boostPower = parseFloat(boostInput.value);
+
+  const targetCar = carModel || car;
+
+  targetCar.traverse?.(obj=>{
+    if(obj.isMesh){
+      obj.material.color.set(tuning.color);
+    }
+  });
+
+}
+
+// ===== 物理へ反映 =====
+const oldPhysics = updatePhysics;
+
+function updatePhysics(){
+
+  const inp = getInput();
+
+  let ratio = 1;
+
+  if(transmission.mode === "MT"){
+    ratio = transmission.gearRatio[transmission.gear] || 0;
+  } else {
+    const s = Math.abs(velocity);
+
+    if(s < 10) transmission.gear = 1;
+    else if(s < 25) transmission.gear = 2;
+    else if(s < 45) transmission.gear = 3;
+    else if(s < 65) transmission.gear = 4;
+    else if(s < 80) transmission.gear = 5;
+    else transmission.gear = 6;
+
+    ratio = transmission.gearRatio[transmission.gear];
+  }
+
+  // エンジン強化
+  if(inp.fwd) velocity += ACCEL * ratio * tuning.engine;
+
+  if(inp.rev) velocity -= BRAKE;
+
+  if(inp.hb) velocity *= 0.95;
+
+  velocity *= FRICTION;
+
+  velocity = Math.max(-20, Math.min(MAX_SPEED, velocity));
+
+  // グリップ反映
+  let steer = 0;
+  if(inp.left) steer += STEER_POWER * tuning.grip;
+  if(inp.right) steer -= STEER_POWER * tuning.grip;
+
+  yaw += steer * (velocity / 20);
+
+  car.position.x += Math.sin(yaw) * velocity * 0.05;
+  car.position.z += Math.cos(yaw) * velocity * 0.05;
+  car.rotation.y = yaw;
+
+  document.getElementById("speed").innerText =
+    Math.floor(Math.abs(velocity)*3.6);
+
+  document.getElementById("gear").innerText =
+    transmission.mode === "AT"
+      ? "D" + transmission.gear
+      : transmission.gear || "N";
+}
+
+// ===== ブースト強化反映 =====
+const oldEffects = updateEffects;
+
+function updateEffects(){
+
+  if(boosting && boost > 0){
+    velocity += 1.5 * tuning.boostPower;
+    boost -= 0.5;
+    cameraShake(0.2);
+  } else {
+    boost += 0.2;
+  }
+
+  boost = Math.max(0, Math.min(100, boost));
+
+  speedLines.forEach(line=>{
+    line.position.set(
+      car.position.x + (Math.random()-0.5)*5,
+      car.position.y + Math.random()*2,
+      car.position.z + Math.random()*20
+    );
+
+    line.visible = Math.abs(velocity) > 40;
+  });
+
+  const baseFov = 70;
+  camera.fov = baseFov + Math.abs(velocity) * 0.3;
+  camera.updateProjectionMatrix();
+}
+
+// ===== 保存 =====
+function saveTuning(){
+  localStorage.setItem("nero_tuning", JSON.stringify(tuning));
+}
+
+// ===== 読み込み =====
+function loadTuning(){
+  const data = localStorage.getItem("nero_tuning");
+  if(!data) return;
+
+  const t = JSON.parse(data);
+  Object.assign(tuning, t);
+
+  colorInput.value = tuning.color;
+  engineInput.value = tuning.engine;
+  gripInput.value = tuning.grip;
+  boostInput.value = tuning.boostPower;
+}
+
+// 初期ロード
+loadTuning();
+
+// 定期保存
+setInterval(()=>{
+  applyTuning();
+  saveTuning();
+}, 500);
+/* =========================================
+   Part 12 : 擬似オンライン対戦（ローカル共有）
+========================================= */
+
+// ===== 他プレイヤー =====
+const ghostPlayers = [];
+
+// ===== ゴースト生成 =====
+function createGhost(){
+  const g = new THREE.Mesh(
+    new THREE.BoxGeometry(2,1,4),
+    new THREE.MeshStandardMaterial({color:0x00ffff})
+  );
+
+  scene.add(g);
+  ghostPlayers.push(g);
+  return g;
+}
+
+// 1体生成
+const ghost = createGhost();
+
+// ===== データ送信（localStorage共有）=====
+function sendData(){
+
+  const data = {
+    x: car.position.x,
+    z: car.position.z,
+    yaw: yaw,
+    time: Date.now()
+  };
+
+  localStorage.setItem("nero_online", JSON.stringify(data));
+}
+
+// ===== データ受信 =====
+function receiveData(){
+
+  const raw = localStorage.getItem("nero_online");
+  if(!raw) return;
+
+  const data = JSON.parse(raw);
+
+  // 自分との差が小さければ無視
+  if(Math.abs(data.x - car.position.x) < 0.1 &&
+     Math.abs(data.z - car.position.z) < 0.1) return;
+
+  ghost.position.x += (data.x - ghost.position.x) * 0.2;
+  ghost.position.z += (data.z - ghost.position.z) * 0.2;
+  ghost.rotation.y = data.yaw;
+
+}
+
+// ===== UI =====
+const onlineUI = document.createElement("div");
+onlineUI.style.position = "fixed";
+onlineUI.style.top = "80px";
+onlineUI.style.left = "50%";
+onlineUI.style.transform = "translateX(-50%)";
+onlineUI.style.color = "#00ffff";
+onlineUI.innerText = "ONLINE: OFF";
+document.body.appendChild(onlineUI);
+
+// ===== ON/OFF =====
+let onlineMode = false;
+
+window.addEventListener("keydown", e=>{
+  if(e.code === "KeyO"){
+    onlineMode = !onlineMode;
+    onlineUI.innerText = "ONLINE: " + (onlineMode ? "ON" : "OFF");
+  }
+});
+
+// ===== loop拡張 =====
+const oldLoop8 = loop;
+
+function loop(){
+
+  updatePro();
+  updateFinal();
+
+  updatePhysics();
+  applyLane();
+  applyWanganCurve();
+  updateRoad();
+  updateEnemies();
+  updateRivals();
+  checkOvertake();
+  updateGame();
+  updateEnvironment();
+  updateEffects();
+  updateSound();
+  updateSparks();
+  checkCollisions();
+
+  // ===== 擬似オンライン =====
+  if(onlineMode){
+    sendData();
+    receiveData();
+  }
+
+  const activeCar = carModel || car;
+
+  camera.position.x += (activeCar.position.x - camera.position.x) * 0.15;
+  camera.position.z += (activeCar.position.z - 12 - camera.position.z) * 0.15;
+  camera.position.y += (5 - camera.position.y) * 0.1;
+
+  camera.lookAt(activeCar.position);
+
+  composer.render();
+
+  requestAnimationFrame(loop);
+}
+/* =========================================
+   Part 13 : 最適化（FPS改善・軽量化）
+========================================= */
+
+// ===== 描画負荷制御 =====
+let quality = "HIGH"; // HIGH / MEDIUM / LOW
+
+const qualityUI = document.createElement("div");
+qualityUI.style.position = "fixed";
+qualityUI.style.bottom = "180px";
+qualityUI.style.right = "20px";
+qualityUI.style.color = "#0f0";
+qualityUI.innerText = "QUALITY: HIGH";
+document.body.appendChild(qualityUI);
+
+// 切替
+window.addEventListener("keydown", e=>{
+  if(e.code === "KeyP"){
+    if(quality === "HIGH") quality = "MEDIUM";
+    else if(quality === "MEDIUM") quality = "LOW";
+    else quality = "HIGH";
+
+    qualityUI.innerText = "QUALITY: " + quality;
+    applyQuality();
+  }
+});
+
+// ===== 品質適用 =====
+function applyQuality(){
+
+  if(quality === "LOW"){
+    renderer.setPixelRatio(0.5);
+    bloomPass.strength = 0.3;
+  }
+
+  if(quality === "MEDIUM"){
+    renderer.setPixelRatio(0.75);
+    bloomPass.strength = 0.7;
+  }
+
+  if(quality === "HIGH"){
+    renderer.setPixelRatio(window.devicePixelRatio);
+    bloomPass.strength = 1.2;
+  }
+
+}
+
+// 初期適用
+applyQuality();
+
+// ===== FPSカウンター =====
+let fps = 0;
+let frames = 0;
+let lastFpsTime = performance.now();
+
+const fpsUI = document.createElement("div");
+fpsUI.style.position = "fixed";
+fpsUI.style.top = "10px";
+fpsUI.style.right = "20px";
+fpsUI.style.color = "#0f0";
+document.body.appendChild(fpsUI);
+
+function updateFPS(){
+
+  frames++;
+
+  const now = performance.now();
+
+  if(now - lastFpsTime >= 1000){
+    fps = frames;
+    frames = 0;
+    lastFpsTime = now;
+
+    fpsUI.innerText = "FPS: " + fps;
+  }
+
+}
+
+// ===== オブジェクト削減（遠距離カリング）=====
+function cullObjects(){
+
+  const maxDist = 500;
+
+  [...enemies, ...rivals].forEach(obj=>{
+    const dz = Math.abs(obj.position.z - car.position.z);
+
+    obj.visible = dz < maxDist;
+  });
+
+}
+
+// ===== 軽量モード（自動）=====
+function autoOptimize(){
+
+  if(fps < 30 && quality !== "LOW"){
+    quality = "LOW";
+    applyQuality();
+    qualityUI.innerText = "QUALITY: AUTO LOW";
+  }
+
+}
+
+// ===== loop最終最適化版 =====
+const oldLoop9 = loop;
+
+function loop(){
+
+  updatePro();
+  updateFinal();
+
+  updatePhysics();
+  applyLane();
+  applyWanganCurve();
+  updateRoad();
+  updateEnemies();
+  updateRivals();
+  checkOvertake();
+  updateGame();
+  updateEnvironment();
+  updateEffects();
+  updateSound();
+  updateSparks();
+  checkCollisions();
+
+  if(onlineMode){
+    sendData();
+    receiveData();
+  }
+
+  // ===== 最適化処理 =====
+  cullObjects();
+  updateFPS();
+  autoOptimize();
+
+  const activeCar = carModel || car;
+
+  camera.position.x += (activeCar.position.x - camera.position.x) * 0.15;
+  camera.position.z += (activeCar.position.z - 12 - camera.position.z) * 0.15;
+  camera.position.y += (5 - camera.position.y) * 0.1;
+
+  camera.lookAt(activeCar.position);
+
+  composer.render();
+
+  requestAnimationFrame(loop);
+}
+/* =========================================
+   Part 14 : 公開用仕上げ（スタート/ポーズ/チュートリアル）
+========================================= */
+
+// ===== ゲーム状態 =====
+let gameState = "MENU"; // MENU / PLAY / PAUSE
+
+// ===== UI =====
+const overlay = document.createElement("div");
+overlay.style.position = "fixed";
+overlay.style.inset = "0";
+overlay.style.display = "flex";
+overlay.style.alignItems = "center";
+overlay.style.justifyContent = "center";
+overlay.style.background = "rgba(0,0,0,0.7)";
+overlay.style.color = "#fff";
+overlay.style.fontFamily = "monospace";
+overlay.style.zIndex = "9999";
+overlay.innerHTML = `
+  <div style="text-align:center">
+    <h1>NERO</h1>
+    <p>湾岸ストリートレーサー</p>
+    <button id="startBtn">START</button><br><br>
+    <button id="howBtn">HOW TO PLAY</button>
+    <div id="howText" style="display:none; margin-top:10px; font-size:12px;">
+      W 前進 / S ブレーキ<br>
+      A D ハンドル<br>
+      SHIFT ブースト<br>
+      ← → レーン変更<br>
+      O オンライン<br>
+      P 画質変更
+    </div>
+  </div>
+`;
+document.body.appendChild(overlay);
+
+// ボタン
+document.getElementById("startBtn").onclick = ()=>{
+  gameState = "PLAY";
+  overlay.style.display = "none";
+};
+
+document.getElementById("howBtn").onclick = ()=>{
+  const el = document.getElementById("howText");
+  el.style.display = el.style.display === "none" ? "block" : "none";
+};
+
+// ===== ポーズ =====
+window.addEventListener("keydown", e=>{
+  if(e.code === "Escape"){
+    if(gameState === "PLAY"){
+      gameState = "PAUSE";
+      overlay.style.display = "flex";
+      overlay.innerHTML = "<h1>PAUSED</h1><p>ESCで戻る</p>";
+    } else if(gameState === "PAUSE"){
+      gameState = "PLAY";
+      overlay.style.display = "none";
+    }
+  }
+});
+
+// ===== クリックで音解禁対策 =====
+window.addEventListener("click", ()=>{
+  if(engineSound && !engineSound.isPlaying){
+    engineSound.play();
+  }
+});
+
+// ===== loop最終制御 =====
+const oldLoop10 = loop;
+
+function loop(){
+
+  if(gameState !== "PLAY"){
+    requestAnimationFrame(loop);
+    return;
+  }
+
+  updatePro();
+  updateFinal();
+
+  updatePhysics();
+  applyLane();
+  applyWanganCurve();
+  updateRoad();
+  updateEnemies();
+  updateRivals();
+  checkOvertake();
+  updateGame();
+  updateEnvironment();
+  updateEffects();
+  updateSound();
+  updateSparks();
+  checkCollisions();
+
+  if(onlineMode){
+    sendData();
+    receiveData();
+  }
+
+  cullObjects();
+  updateFPS();
+  autoOptimize();
+
+  const activeCar = carModel || car;
+
+  camera.position.x += (activeCar.position.x - camera.position.x) * 0.15;
+  camera.position.z += (activeCar.position.z - 12 - camera.position.z) * 0.15;
+  camera.position.y += (5 - camera.position.y) * 0.1;
+
+  camera.lookAt(activeCar.position);
+
+  composer.render();
+
+  requestAnimationFrame(loop);
+}
+/* =========================================
+   Part 15 : 最終仕上げ（難易度 + 軽量化固定）
+========================================= */
+
+// ===== 難易度 =====
+let difficulty = "NORMAL"; // EASY / NORMAL / HARD
+
+const diffUI = document.createElement("div");
+diffUI.style.position = "fixed";
+diffUI.style.top = "120px";
+diffUI.style.left = "50%";
+diffUI.style.transform = "translateX(-50%)";
+diffUI.style.color = "#fff";
+diffUI.innerText = "DIFFICULTY: NORMAL";
+document.body.appendChild(diffUI);
+
+// 切替
+window.addEventListener("keydown", e=>{
+  if(e.code === "KeyL"){
+    if(difficulty === "EASY") difficulty = "NORMAL";
+    else if(difficulty === "NORMAL") difficulty = "HARD";
+    else difficulty = "EASY";
+
+    diffUI.innerText = "DIFFICULTY: " + difficulty;
+  }
+});
+
+// ===== 難易度適用 =====
+function applyDifficulty(){
+
+  if(difficulty === "EASY"){
+    ACCEL = 0.6;
+    BRAKE = 0.4;
+  }
+
+  if(difficulty === "NORMAL"){
+    ACCEL = 0.4;
+    BRAKE = 0.6;
+  }
+
+  if(difficulty === "HARD"){
+    ACCEL = 0.3;
+    BRAKE = 0.8;
+  }
+
+}
+
+// ===== 初期固定（軽量設定）=====
+function finalOptimize(){
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1));
+  bloomPass.strength = 0.8;
+}
+
+finalOptimize();
+
+// ===== loop完全最終 =====
+const oldLoop11 = loop;
+
+function loop(){
+
+  if(gameState !== "PLAY"){
+    requestAnimationFrame(loop);
+    return;
+  }
+
+  applyDifficulty();
+
+  updatePro();
+  updateFinal();
+
+  updatePhysics();
+  applyLane();
+  applyWanganCurve();
+  updateRoad();
+  updateEnemies();
+  updateRivals();
+  checkOvertake();
+  updateGame();
+  updateEnvironment();
+  updateEffects();
+  updateSound();
+  updateSparks();
+  checkCollisions();
+
+  if(onlineMode){
+    sendData();
+    receiveData();
+  }
+
+  cullObjects();
+  updateFPS();
+  autoOptimize();
+
+  const activeCar = carModel || car;
+
+  camera.position.x += (activeCar.position.x - camera.position.x) * 0.15;
+  camera.position.z += (activeCar.position.z - 12 - camera.position.z) * 0.15;
+  camera.position.y += (5 - camera.position.y) * 0.1;
+
+  camera.lookAt(activeCar.position);
+
+  composer.render();
+
+  requestAnimationFrame(loop);
+}
