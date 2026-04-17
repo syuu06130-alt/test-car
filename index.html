@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NERO — 湾岸レーサー</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- ===== HUD ===== -->
+<div id="hud">
+
+  <!-- 上部UI -->
+  <div class="hud-top">
+    <div>SCORE: <span id="score">0</span></div>
+    <div>TIME: <span id="time">0</span></div>
+  </div>
+
+  <!-- スピード -->
+  <div id="speedo">
+    <div id="speed">0</div>
+    <div class="unit">KM/H</div>
+    <div id="gear">N</div>
+  </div>
+
+  <!-- 操作説明 -->
+  <div id="controls-ui">
+    W : 前進<br>
+    S : ブレーキ / バック<br>
+    A : 左<br>
+    D : 右<br>
+    SPACE : ハンドブレーキ
+  </div>
+
+  <!-- ミッションUI -->
+  <div id="gear-ui">
+    <div class="mode">
+      <button onclick="setAT()">AT</button>
+      <button onclick="setMT()">MT</button>
+    </div>
+    <div id="gear-buttons"></div>
+  </div>
+
+</div>
+
+<!-- Three.js -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+
+<!-- 本体 -->
+<script src="script.js"></script>
+
+</body>
+</html>
